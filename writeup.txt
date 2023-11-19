@@ -1,0 +1,5 @@
+For all models, I used the default train/test split ussed in hw3.
+
+For Play Prediction I found that the Bayseian Personalized Ranking produced a decent error rate. To adapt the ranking to create binary predictions, I use a threshold hyperparameter, and compared the model's prediction vlaue to.
+
+For Time Prediction, I could not find a model that significantly beat the baseline. However, through tuning hyperparameters, I was able to decrease the MSE by a small margin.  

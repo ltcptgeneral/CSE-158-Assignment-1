@@ -87,7 +87,15 @@ class BPRbatch(tf.keras.Model):
 
     # Prediction for a single instance
     def predict(self, u, i):
-        p = self.betaI[i] + tf.tensordot(self.gammaU[u], self.gammaI[i], 1)
+        bi = self.bi
+        gu = self.gu
+        gi = self.gi
+        if u != None:
+            gu = self.gammaU[u]
+        if i != None:
+            bi = self.betaI[i]
+            gi = self.gammaI[i]
+        p = bi + tf.tensordot(gu, gi, 1)
         return p
 
     # Regularizer
@@ -109,6 +117,11 @@ class BPRbatch(tf.keras.Model):
         x_ui = self.score(sampleU, sampleI)
         x_uj = self.score(sampleU, sampleJ)
         return -tf.reduce_mean(tf.math.log(tf.math.sigmoid(x_ui - x_uj)))
+    
+    def finalize(self):
+        self.bi = np.average(self.betaI, axis=0)
+        self.gu = np.average(self.gammaU, axis=0)
+        self.gi = np.average(self.gammaI, axis=0)
 
 # %% [markdown]
 # ### Play Predictor
@@ -119,9 +132,7 @@ class PlayPredictor:
     def __init__(self):
         pass
 
-    def fit(self, data, threshold=0.6, K=5, iters=100): # data is an array of (user, game, review) tuples
-        self.topGames = self.getTopGames(threshold)
-
+    def fit(self, data, K=5, iters=100): # data is an array of (user, game, review) tuples
         self.userIDs = {}
         self.itemIDs = {}
         interactions = []
@@ -166,47 +177,33 @@ class PlayPredictor:
         for i in range(iters):
             obj = trainingStepBPR(self.modelBPR, interactions)
             if (i % 10 == 9): print("iteration " + str(i+1) + ", objective = " + str(obj))
+
+        self.modelBPR.finalize()
             
     def predict(self, user, game, threshold=0.5):
-        if user in self.userIDs and game in self.itemIDs:
-            pred = self.modelBPR.predict(self.userIDs[user], self.itemIDs[game]).numpy()
-            return int(pred > threshold)
-        else:
-            return int(game in self.topGames)
-
-    def getTopGames (self, threshold):
-        gameCount = defaultdict(int)
-        totalPlayed = 0
-
-        for user,game,_ in readJSON("train.json.gz"):
-            gameCount[game] += 1
-            totalPlayed += 1
-
-        mostPopular = [(gameCount[x], x) for x in gameCount]
-        mostPopular.sort()
-        mostPopular.reverse()
-
-        return1 = set()
-        count = 0
-        for ic, i in mostPopular:
-            count += ic
-            return1.add(i)
-            if count > totalPlayed * threshold: break
-        return return1
+        uid = None
+        gid = None
+        if user in self.userIDs:
+            uid = self.userIDs[user]
+        if game in self.itemIDs:
+            gid = self.itemIDs[game]
+        pred = self.modelBPR.predict(uid, gid).numpy()
+        return int(pred > threshold)
 
 
 # %%
 model = PlayPredictor()
 model.fit(train, K=6, iters=200)
 
-error = 0
+# %%
+CM = np.array([[0,0], [0,0]])
 balanced_valid = get_balanced_set(dataset, valid)
 for user, game, review in balanced_valid:
     pred = model.predict(user, game, threshold=0.5)
-    if pred != review["played"]:
-        error += 1
+    CM[review["played"]][pred] += 1
 
-print(f"PlayPredictor accuracy: ", 1 - error / len(balanced_valid))
+print(CM)
+print(f"PlayPredictor accuracy: ", 1 - (CM[1][0] + CM[0][1]) / len(balanced_valid))
 
 # %%
 writePredictions("pairs_Played.csv", "predictions_Played.csv", model)
